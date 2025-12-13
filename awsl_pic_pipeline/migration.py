@@ -18,20 +18,6 @@ engine = create_engine(settings.db_url, pool_size=100)
 DBSession = sessionmaker(bind=engine)
 PIC_TYPES: List[str] = ["original", "large"]
 UPLOAD_DELAY: float = 3.0
-URL_CHECK_RETRIES: int = 3
-URL_CHECK_DELAY: float = 1.0
-
-
-def check_url_exists(url: str) -> bool:
-    """Check if URL exists using HEAD request with retry."""
-    for attempt in range(URL_CHECK_RETRIES):
-        try:
-            response: httpx.Response = _client.head(url)
-            return response.status_code == 200
-        except httpx.HTTPError as e:
-            _logger.warning("URL check failed (attempt %d/%d) %s: %s", attempt + 1, URL_CHECK_RETRIES, url, e)
-            time.sleep(URL_CHECK_DELAY * (attempt + 1))
-    return False
 
 
 def delete_pic(blob_group: BlobGroup) -> None:
@@ -47,6 +33,16 @@ def delete_pic(blob_group: BlobGroup) -> None:
         session.commit()
     finally:
         session.close()
+
+
+def delete_upload_group(group: UploadGroup) -> None:
+    """Mark all pics in upload group as deleted."""
+    if not settings.enable_delete:
+        _logger.info("Delete disabled, skipping awsl_id=%s", group.awsl_id)
+        return
+    for blob_group in group.blob_groups:
+        delete_pic(blob_group)
+    _logger.info("Deleted all pics for awsl_id=%s", group.awsl_id)
 
 
 def get_all_pic_to_upload() -> List[UploadGroup]:
@@ -91,11 +87,6 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
                         )
                     })
                 )
-
-                if not check_url_exists(url):
-                    _logger.warning("URL not exists, deleting pic_id=%s: %s", pic.pic_id, url)
-                    delete_pic(blob_group)
-                    break
 
                 if pic.awsl_id not in awsl_groups:
                     wb_url: str = f"https://weibo.com/{mblog.uid}/{mblog.mblogid}" if mblog else ""
@@ -146,6 +137,7 @@ def upload_group_to_telegram(group: UploadGroup) -> bool:
 
     if not result:
         _logger.error("Upload failed for awsl_id=%s", group.awsl_id)
+        delete_upload_group(group)
         return False
 
     save_telegram_files(result)
@@ -166,6 +158,7 @@ def migration() -> None:
                 fail_count += 1
         except Exception as e:
             _logger.exception("Error uploading group %s: %s", group.awsl_id, e)
+            delete_upload_group(group)
             fail_count += 1
         time.sleep(UPLOAD_DELAY)
 
