@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from .config import settings
 from .models.models import Pic, AwslBlobV2, Mblog, AwslProducer
 from .models.pydantic_models import Blob, Blobs, BlobGroup, UploadGroup
-from .storage import upload_media_group
+from .storage import upload_media_group, UploadResult
 
 _logger = logging.getLogger(__name__)
 _client: httpx.Client = httpx.Client(timeout=10)
@@ -132,34 +132,48 @@ def save_telegram_files(blob_groups: List[BlobGroup]) -> None:
 
 
 def upload_group_to_telegram(group: UploadGroup) -> bool:
-    """Upload a group of pics to Telegram."""
-    result: Optional[List[BlobGroup]] = upload_media_group(group)
+    """Upload a group of pics to Telegram, handling partial success."""
+    result: UploadResult = upload_media_group(group)
 
-    if not result:
-        _logger.error("Upload failed for awsl_id=%s", group.awsl_id)
-        delete_upload_group(group)
+    # Save successfully uploaded pics
+    if result.succeeded:
+        save_telegram_files(result.succeeded)
+        _logger.info("Saved %d succeeded pics for awsl_id=%s", len(result.succeeded), group.awsl_id)
+
+    # Delete failed pics
+    if result.failed:
+        for blob_group in result.failed:
+            delete_pic(blob_group)
+        _logger.warning("Deleted %d failed pics for awsl_id=%s", len(result.failed), group.awsl_id)
+
+    # Return True if at least some pics succeeded
+    if result.succeeded:
+        return True
+    else:
+        _logger.error("All pics failed for awsl_id=%s", group.awsl_id)
         return False
-
-    save_telegram_files(result)
-    return True
 
 
 def migration() -> None:
     """Main migration function."""
     groups: List[UploadGroup] = get_all_pic_to_upload()
+    total_groups: int = len(groups)
     success_count: int = 0
     fail_count: int = 0
 
-    for group in groups:
+    _logger.info("Starting migration: %d groups to process", total_groups)
+
+    for idx, group in enumerate(groups, 1):
+        _logger.info("Processing group %d/%d (awsl_id=%s)", idx, total_groups, group.awsl_id)
         try:
             if upload_group_to_telegram(group):
                 success_count += 1
             else:
                 fail_count += 1
         except Exception as e:
-            _logger.exception("Error uploading group %s: %s", group.awsl_id, e)
+            _logger.exception("Error uploading group %d/%d (awsl_id=%s): %s", idx, total_groups, group.awsl_id, e)
             delete_upload_group(group)
             fail_count += 1
         time.sleep(UPLOAD_DELAY)
 
-    _logger.info("Migration completed: success=%d, fail=%d", success_count, fail_count)
+    _logger.info("Migration completed: success=%d, fail=%d, total=%d", success_count, fail_count, total_groups)
