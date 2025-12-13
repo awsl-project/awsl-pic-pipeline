@@ -1,12 +1,12 @@
 version: "2"
 
 services:
-  awsl-blob:
+  awsl-pic-pipeline:
     build:
       context: ../
-      dockerfile: ./docker/Dockerfile
-    image: registry.cn-beijing.aliyuncs.com/dreamhunter/awsl:blob
-    container_name: awsl-blob
+      dockerfile: ./docker/dockerfile
+    image: registry.cn-beijing.aliyuncs.com/dreamhunter/awsl:pic-pipeline
+    container_name: awsl-pic-pipeline
     environment:
       ENV_FILE: .env
     volumes:

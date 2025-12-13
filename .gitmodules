@@ -1,3 +1,3 @@
-[submodule "awsl_blob/models"]
-	path = awsl_blob/models
+[submodule "awsl_pic_pipeline/models"]
+	path = awsl_pic_pipeline/models
 	url = https://github.com/awsl-project/sqlalchemy-models
