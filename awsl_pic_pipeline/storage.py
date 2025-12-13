@@ -164,19 +164,19 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
     """Upload single image as document (fallback when photo upload fails). Only retry on 429."""
     api_url: str = f"{settings.awsl_storage_url.rstrip('/')}/api/upload"
 
-    payload: dict = {
+    # Use form data instead of JSON
+    form_data: dict = {
         "url": url,
         "media_type": "document"
     }
 
     headers: dict[str, str] = {
         "X-Api-Token": settings.awsl_storage_api_token,
-        "Content-Type": "application/json",
     }
 
     for attempt in range(MAX_RETRIES):
         try:
-            response: httpx.Response = _client.post(api_url, json=payload, headers=headers)
+            response: httpx.Response = _client.post(api_url, data=form_data, headers=headers)
             data: dict = response.json()
 
             if not data.get("success"):
