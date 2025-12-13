@@ -99,11 +99,19 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
 
                 if pic.awsl_id not in awsl_groups:
                     wb_url: str = f"https://weibo.com/{mblog.uid}/{mblog.mblogid}" if mblog else ""
-                    producer_name: str = producer.name if producer else ""
+                    screen_name: str = ""
+                    if mblog and mblog.re_user:
+                        try:
+                            re_user: dict = json.loads(mblog.re_user)
+                            screen_name = re_user.get("screen_name", "")
+                        except json.JSONDecodeError:
+                            pass
+                    if not screen_name and producer:
+                        screen_name = producer.name or ""
                     awsl_groups[pic.awsl_id] = UploadGroup(
                         awsl_id=pic.awsl_id,
                         blob_groups=[],
-                        caption=f"#{producer_name} {wb_url}" if producer_name else wb_url,
+                        caption=f"#{screen_name} {wb_url}" if screen_name else wb_url,
                     )
                 awsl_groups[pic.awsl_id].blob_groups.append(blob_group)
                 break

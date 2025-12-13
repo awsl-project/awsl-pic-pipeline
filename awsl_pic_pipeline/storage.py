@@ -87,8 +87,8 @@ def upload_media_group(group: UploadGroup) -> Optional[List[BlobGroup]]:
     Returns:
         List of BlobGroup with telegram file info, or None on failure
     """
-    if not settings.awsl_storage_url or not settings.awsl_api_token:
-        raise ValueError("awsl_storage_url and awsl_api_token must be configured")
+    if not settings.awsl_storage_url or not settings.awsl_storage_api_token:
+        raise ValueError("awsl_storage_url and awsl_storage_api_token must be configured")
 
     if not group.blob_groups:
         raise ValueError("At least 1 BlobGroup required")
@@ -123,7 +123,7 @@ def _upload_batch(urls: List[str], caption: Optional[str] = None) -> Optional[Li
         payload["caption"] = caption
 
     headers: dict[str, str] = {
-        "X-Api-Token": settings.awsl_api_token,
+        "X-Api-Token": settings.awsl_storage_api_token,
         "Content-Type": "application/json",
     }
 
