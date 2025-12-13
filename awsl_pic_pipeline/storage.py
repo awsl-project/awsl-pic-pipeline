@@ -19,7 +19,7 @@ class TelegramFile(BaseModel):
     height: Optional[int] = None
 
 
-BATCH_SIZE: int = 9
+BATCH_SIZE: int = 6
 MAX_RETRIES: int = 10
 RETRY_DELAY: float = 5.0
 
@@ -135,6 +135,9 @@ def _upload_batch(urls: List[str], caption: Optional[str] = None) -> Optional[Li
 
             if not data.get("success"):
                 last_error = data.get("error", "Unknown error")
+                if "WEBPAGE_MEDIA_EMPTY" in last_error:
+                    _logger.warning("WEBPAGE_MEDIA_EMPTY detected, skipping: %s", last_error)
+                    return None
                 _logger.warning("Upload failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, last_error)
                 time.sleep(RETRY_DELAY * (attempt + 1))
                 continue
