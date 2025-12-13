@@ -160,14 +160,33 @@ def upload_media_group(group: UploadGroup) -> UploadResult:
     return UploadResult(succeeded=succeeded, failed=failed)
 
 
+def _download_image(url: str) -> Optional[bytes]:
+    """Download image from URL to memory."""
+    try:
+        _logger.info("Downloading image: %s", url)
+        response: httpx.Response = _client.get(url, timeout=30)
+        response.raise_for_status()
+        _logger.info("Downloaded %d bytes", len(response.content))
+        return response.content
+    except httpx.HTTPError as e:
+        _logger.warning("Failed to download image: %s", e)
+        return None
+
+
 def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
     """Upload single image as document (fallback when photo upload fails). Only retry on 429."""
     api_url: str = f"{settings.awsl_storage_url.rstrip('/')}/api/upload"
 
-    # Use form data instead of JSON
-    form_data: dict = {
-        "url": url,
-        "media_type": "document"
+    # Try to download image locally first
+    image_data: Optional[bytes] = _download_image(url)
+    if not image_data:
+        _logger.warning("Cannot download image, skipping document upload")
+        return None
+
+    # Prepare multipart form data with binary file
+    files: dict = {
+        "file": ("image.jpg", image_data, "image/jpeg"),
+        "media_type": (None, "document"),
     }
 
     headers: dict[str, str] = {
@@ -176,7 +195,7 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
 
     for attempt in range(MAX_RETRIES):
         try:
-            response: httpx.Response = _client.post(api_url, data=form_data, headers=headers)
+            response: httpx.Response = _client.post(api_url, files=files, headers=headers)
             data: dict = response.json()
 
             if not data.get("success"):
@@ -191,13 +210,13 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
                     _logger.warning("Document upload failed (non-retriable): %s", error)
                     return None
 
-            files: List[TelegramFile] = [
+            telegram_files: List[TelegramFile] = [
                 TelegramFile(file_id=f["file_id"], width=f.get("width"), height=f.get("height"))
                 for f in data.get("files", [])
             ]
 
             _logger.info("Successfully uploaded as document")
-            return files
+            return telegram_files
 
         except httpx.HTTPError as e:
             _logger.warning("Document upload request failed: %s", e)
