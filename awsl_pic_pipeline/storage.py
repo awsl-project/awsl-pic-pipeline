@@ -124,10 +124,17 @@ def upload_media_group(group: UploadGroup) -> UploadResult:
                 single_result: BatchUploadResult = _upload_batch([url], group.caption)
                 if single_result.files and len(single_result.files) > 0:
                     all_files.append(single_result.files[0])
-                    _logger.info("Successfully uploaded image %d/%d", i + 1, len(batch_urls))
+                    _logger.info("Successfully uploaded image %d/%d as photo", i + 1, len(batch_urls))
                 else:
-                    all_files.append(None)
-                    _logger.warning("Failed to upload image %d/%d: %s", i + 1, len(batch_urls), url)
+                    # Fallback: try uploading as document
+                    _logger.info("Photo upload failed for image %d/%d, trying as document: %s", i + 1, len(batch_urls), url)
+                    document_files: Optional[List[TelegramFile]] = _upload_as_document(url)
+                    if document_files:
+                        all_files.append(document_files)
+                        _logger.info("Successfully uploaded image %d/%d as document", i + 1, len(batch_urls))
+                    else:
+                        all_files.append(None)
+                        _logger.warning("Failed to upload image %d/%d (both photo and document): %s", i + 1, len(batch_urls), url)
                 if i < len(batch_urls) - 1:  # Don't delay after last image
                     time.sleep(INDIVIDUAL_RETRY_DELAY)
         else:
@@ -151,6 +158,56 @@ def upload_media_group(group: UploadGroup) -> UploadResult:
 
     _logger.info("Upload result: %d succeeded, %d failed", len(succeeded), len(failed))
     return UploadResult(succeeded=succeeded, failed=failed)
+
+
+def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
+    """Upload single image as document (fallback when photo upload fails). Only retry on 429."""
+    api_url: str = f"{settings.awsl_storage_url.rstrip('/')}/api/upload"
+
+    payload: dict = {
+        "url": url,
+        "media_type": "document"
+    }
+
+    headers: dict[str, str] = {
+        "X-Api-Token": settings.awsl_storage_api_token,
+        "Content-Type": "application/json",
+    }
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response: httpx.Response = _client.post(api_url, json=payload, headers=headers)
+            data: dict = response.json()
+
+            if not data.get("success"):
+                error: str = data.get("error", "Unknown error")
+                # Only retry on rate limit (429)
+                if "Too Many Requests" in error or "retry after" in error.lower():
+                    _logger.warning("Document upload rate limited (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, error)
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    continue
+                else:
+                    # Other errors, don't retry
+                    _logger.warning("Document upload failed (non-retriable): %s", error)
+                    return None
+
+            files: List[TelegramFile] = [
+                TelegramFile(file_id=f["file_id"], width=f.get("width"), height=f.get("height"))
+                for f in data.get("files", [])
+            ]
+
+            _logger.info("Successfully uploaded as document")
+            return files
+
+        except httpx.HTTPError as e:
+            _logger.warning("Document upload request failed: %s", e)
+            return None
+        except json.JSONDecodeError as e:
+            _logger.warning("Document upload JSON parse failed: %s", e)
+            return None
+
+    _logger.error("Document upload failed after %d rate limit retries", MAX_RETRIES)
+    return None
 
 
 def _upload_batch(urls: List[str], caption: Optional[str] = None) -> BatchUploadResult:
