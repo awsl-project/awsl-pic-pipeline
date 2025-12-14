@@ -51,8 +51,11 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
     try:
         # First, get the top N awsl_id values to process
         # This ensures we limit by the number of groups, not total rows
+        # Also join Mblog to ensure awsl_id has corresponding mblog record
         awsl_ids_subquery = session.query(Pic.awsl_id).outerjoin(
             AwslBlobV2, Pic.pic_id == AwslBlobV2.pic_id
+        ).join(
+            Mblog, Pic.awsl_id == Mblog.id
         ).filter(
             AwslBlobV2.pic_id.is_(None)
         ).filter(
