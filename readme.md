@@ -7,10 +7,11 @@ Migrate pics to Telegram storage via awsl-telegram-storage service.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DB_URL` | MySQL connection string | required |
-| `MIGRATION_LIMIT` | Max pics per run | 100 |
+| `MIGRATION_LIMIT` | Max awsl_ids per run | 50 |
 | `AWSL_STORAGE_URL` | awsl-telegram-storage URL | required |
 | `AWSL_STORAGE_API_TOKEN` | API token | required |
-| `ENABLE_DELETE` | Delete pics with broken URLs | false |
+| `AWSL_STORAGE_CHAT_ID` | Target Telegram chat ID (optional) | - |
+| `ENABLE_DELETE` | Delete invalid pics | false |
 
 ## Usage
 
