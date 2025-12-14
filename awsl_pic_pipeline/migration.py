@@ -88,6 +88,7 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
                 pic_info: dict = json.loads(pic.pic_info) if pic.pic_info else {}
             except json.JSONDecodeError:
                 filtered_stats["json_error"] += 1
+                delete_pic(BlobGroup(id=pic.pic_id, awsl_id=pic.awsl_id, blobs=Blobs(blobs={})))
                 continue
 
             found_valid_pic = False
@@ -134,6 +135,7 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
 
             if not found_valid_pic:
                 filtered_stats["no_valid_type"] += 1
+                delete_pic(BlobGroup(id=pic.pic_id, awsl_id=pic.awsl_id, blobs=Blobs(blobs={})))
 
         res: List[UploadGroup] = list(awsl_groups.values())
         _logger.info("get_all_pic_to_upload: %d groups (filtered_pics: invalid_url=%d, no_type=%d, json_err=%d)",
