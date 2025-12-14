@@ -213,6 +213,8 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
         "file": ("image.jpg", image_data, "image/jpeg"),
         "media_type": (None, "document"),
     }
+    if settings.awsl_storage_chat_id:
+        files["chat_id"] = (None, settings.awsl_storage_chat_id)
 
     headers: dict[str, str] = {
         "X-Api-Token": settings.awsl_storage_api_token,
@@ -264,6 +266,8 @@ def _upload_batch(urls: List[str], caption: Optional[str] = None) -> BatchUpload
     payload: dict = {"urls": urls}
     if caption:
         payload["caption"] = caption
+    if settings.awsl_storage_chat_id:
+        payload["chat_id"] = settings.awsl_storage_chat_id
 
     headers: dict[str, str] = {
         "X-Api-Token": settings.awsl_storage_api_token,
