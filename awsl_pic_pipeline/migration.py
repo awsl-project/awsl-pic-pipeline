@@ -16,7 +16,8 @@ _logger = logging.getLogger(__name__)
 _client: httpx.Client = httpx.Client(timeout=10)
 engine = create_engine(settings.db_url, pool_size=100)
 DBSession = sessionmaker(bind=engine)
-PIC_TYPES: List[str] = ["original", "large"]
+# Pic types in priority order (prioritize existing types first)
+PIC_TYPES: List[str] = ["original", "large", "mw2000", "largest", "largecover"]
 UPLOAD_DELAY: float = 3.0
 
 
