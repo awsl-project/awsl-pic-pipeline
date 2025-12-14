@@ -78,20 +78,29 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
         ).order_by(Pic.awsl_id.desc()).all()
 
         awsl_groups: dict[str, UploadGroup] = {}
+        filtered_stats: dict[str, int] = {
+            "json_error": 0,
+            "no_valid_type": 0,
+            "invalid_url": 0,
+        }
         for pic, mblog, producer in pics:
             try:
                 pic_info: dict = json.loads(pic.pic_info) if pic.pic_info else {}
             except json.JSONDecodeError:
-                _logger.warning("Invalid JSON for pic_id=%s", pic.pic_id)
+                filtered_stats["json_error"] += 1
                 continue
+
+            found_valid_pic = False
             for pic_type in PIC_TYPES:
                 if pic_type not in pic_info or not isinstance(pic_info[pic_type], dict):
                     continue
                 pic_data: dict = pic_info[pic_type]
                 url: Optional[str] = pic_data.get("url")
                 if not url or ".gif" in url:
+                    filtered_stats["invalid_url"] += 1
                     continue
 
+                found_valid_pic = True
                 blob_group: BlobGroup = BlobGroup(
                     id=pic.pic_id,
                     awsl_id=pic.awsl_id,
@@ -123,8 +132,12 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
                 awsl_groups[pic.awsl_id].blob_groups.append(blob_group)
                 break
 
+            if not found_valid_pic:
+                filtered_stats["no_valid_type"] += 1
+
         res: List[UploadGroup] = list(awsl_groups.values())
-        _logger.info("get_all_pic_to_upload: count = %s groups", len(res))
+        _logger.info("get_all_pic_to_upload: %d groups (filtered_pics: invalid_url=%d, no_type=%d, json_err=%d)",
+                    len(res), filtered_stats["invalid_url"], filtered_stats["no_valid_type"], filtered_stats["json_error"])
     finally:
         session.close()
     return res
