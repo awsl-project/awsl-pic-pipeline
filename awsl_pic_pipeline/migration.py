@@ -49,7 +49,20 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
     """Get pics grouped by awsl_id with caption."""
     session = DBSession()
     try:
-        pics = session.query(Pic, Mblog, AwslProducer).outerjoin(
+        # First, get the top N awsl_id values to process
+        # This ensures we limit by the number of groups, not total rows
+        awsl_ids_subquery = session.query(Pic.awsl_id).outerjoin(
+            AwslBlobV2, Pic.pic_id == AwslBlobV2.pic_id
+        ).filter(
+            AwslBlobV2.pic_id.is_(None)
+        ).filter(
+            Pic.deleted.isnot(True)
+        ).group_by(Pic.awsl_id).order_by(Pic.awsl_id.desc()).limit(settings.migration_limit).subquery()
+
+        # Then get all pics belonging to those awsl_ids
+        pics = session.query(Pic, Mblog, AwslProducer).filter(
+            Pic.awsl_id.in_(session.query(awsl_ids_subquery.c.awsl_id))
+        ).outerjoin(
             AwslBlobV2, Pic.pic_id == AwslBlobV2.pic_id
         ).join(
             Mblog, Pic.awsl_id == Mblog.id
@@ -59,7 +72,7 @@ def get_all_pic_to_upload() -> List[UploadGroup]:
             AwslBlobV2.pic_id.is_(None)
         ).filter(
             Pic.deleted.isnot(True)
-        ).order_by(Pic.awsl_id.desc()).limit(settings.migration_limit).all()
+        ).order_by(Pic.awsl_id.desc()).all()
 
         awsl_groups: dict[str, UploadGroup] = {}
         for pic, mblog, producer in pics:

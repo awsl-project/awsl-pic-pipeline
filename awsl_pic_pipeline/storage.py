@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import List, Optional
 
@@ -23,6 +24,30 @@ BATCH_SIZE: int = 6
 MAX_RETRIES: int = 10
 RETRY_DELAY: float = 5.0
 INDIVIDUAL_RETRY_DELAY: float = 3.0  # Delay between individual image retries
+
+
+def _parse_retry_after(error_msg: str) -> Optional[float]:
+    """
+    Parse retry-after time from error message.
+
+    Examples:
+        "Too Many Requests: retry after 16" -> 16.0
+        "retry after 5 seconds" -> 5.0
+
+    Returns:
+        Retry time in seconds, or None if not found
+    """
+    if not error_msg:
+        return None
+
+    # Pattern to match "retry after N" where N is a number
+    match = re.search(r'retry after\s+(\d+(?:\.\d+)?)', error_msg, re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
 
 
 def build_telegram_url(file_id: str) -> str:
@@ -202,8 +227,11 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
                 error: str = data.get("error", "Unknown error")
                 # Only retry on rate limit (429)
                 if "Too Many Requests" in error or "retry after" in error.lower():
-                    _logger.warning("Document upload rate limited (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, error)
-                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    retry_after: Optional[float] = _parse_retry_after(error)
+                    delay: float = retry_after if retry_after else (RETRY_DELAY * (attempt + 1))
+                    _logger.warning("Document upload rate limited (attempt %d/%d), sleeping for %.1fs: %s",
+                                   attempt + 1, MAX_RETRIES, delay, error)
+                    time.sleep(delay)
                     continue
                 else:
                     # Other errors, don't retry
@@ -256,8 +284,17 @@ def _upload_batch(urls: List[str], caption: Optional[str] = None) -> BatchUpload
                     _logger.warning("WEBPAGE_MEDIA_EMPTY detected: %s", last_error)
                     is_webpage_media_empty = True
                     return BatchUploadResult(files=None, is_webpage_media_empty=True)
-                _logger.warning("Upload failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, last_error)
-                time.sleep(RETRY_DELAY * (attempt + 1))
+
+                # Check if it's a rate limit error and parse retry time
+                if "Too Many Requests" in last_error or "retry after" in last_error.lower():
+                    retry_after: Optional[float] = _parse_retry_after(last_error)
+                    delay: float = retry_after if retry_after else (RETRY_DELAY * (attempt + 1))
+                    _logger.warning("Upload rate limited (attempt %d/%d), sleeping for %.1fs: %s",
+                                   attempt + 1, MAX_RETRIES, delay, last_error)
+                    time.sleep(delay)
+                else:
+                    _logger.warning("Upload failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, last_error)
+                    time.sleep(RETRY_DELAY * (attempt + 1))
                 continue
 
             files: List[List[TelegramFile]] = [
