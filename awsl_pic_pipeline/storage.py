@@ -136,12 +136,14 @@ def upload_media_group(group: UploadGroup) -> UploadResult:
     all_files: List[Optional[List[TelegramFile]]] = []
     batches: List[List[str]] = [urls[i:i + BATCH_SIZE] for i in range(0, len(urls), BATCH_SIZE)]
 
+    global_idx: int = 0  # Track position in group.blob_groups
     for batch_urls in batches:
         batch_result: BatchUploadResult = _upload_batch(batch_urls, group.caption)
 
         if batch_result.files is not None:
             # Batch upload succeeded
             all_files.extend(batch_result.files)
+            global_idx += len(batch_urls)
         elif batch_result.is_webpage_media_empty:
             # WEBPAGE_MEDIA_EMPTY detected, retry each image individually
             _logger.info("WEBPAGE_MEDIA_EMPTY detected, retrying batch of %d images individually", len(batch_urls))
@@ -151,21 +153,26 @@ def upload_media_group(group: UploadGroup) -> UploadResult:
                     all_files.append(single_result.files[0])
                     _logger.info("Successfully uploaded image %d/%d as photo", i + 1, len(batch_urls))
                 else:
-                    # Fallback: try uploading as document
+                    # Fallback: try uploading as document with original dimensions
+                    original_blob: Blob = list(group.blob_groups[global_idx].blobs.blobs.values())[0]
                     _logger.info("Photo upload failed for image %d/%d, trying as document: %s", i + 1, len(batch_urls), url)
-                    document_files: Optional[List[TelegramFile]] = _upload_as_document(url)
+                    document_files: Optional[List[TelegramFile]] = _upload_as_document(
+                        url, width=original_blob.width, height=original_blob.height
+                    )
                     if document_files:
                         all_files.append(document_files)
                         _logger.info("Successfully uploaded image %d/%d as document", i + 1, len(batch_urls))
                     else:
                         all_files.append(None)
                         _logger.warning("Failed to upload image %d/%d (both photo and document): %s", i + 1, len(batch_urls), url)
+                global_idx += 1
                 if i < len(batch_urls) - 1:  # Don't delay after last image
                     time.sleep(INDIVIDUAL_RETRY_DELAY)
         else:
             # Other error, mark all as failed
             _logger.error("Batch upload failed with non-WEBPAGE_MEDIA_EMPTY error, marking all as failed")
             all_files.extend([None] * len(batch_urls))
+            global_idx += len(batch_urls)
 
     succeeded: List[BlobGroup] = []
     failed: List[BlobGroup] = []
@@ -198,8 +205,14 @@ def _download_image(url: str) -> Optional[bytes]:
         return None
 
 
-def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
-    """Upload single image as document (fallback when photo upload fails). Only retry on 429."""
+def _upload_as_document(url: str, width: Optional[int] = None, height: Optional[int] = None) -> Optional[List[TelegramFile]]:
+    """Upload single image as document (fallback when photo upload fails). Only retry on 429.
+
+    Args:
+        url: Image URL to upload
+        width: Original image width (will be preserved in returned TelegramFile)
+        height: Original image height (will be preserved in returned TelegramFile)
+    """
     api_url: str = f"{settings.awsl_storage_url.rstrip('/')}/api/upload"
 
     # Try to download image locally first
@@ -241,11 +254,16 @@ def _upload_as_document(url: str) -> Optional[List[TelegramFile]]:
                     return None
 
             telegram_files: List[TelegramFile] = [
-                TelegramFile(file_id=f["file_id"], width=f.get("width"), height=f.get("height"))
+                TelegramFile(
+                    file_id=f["file_id"],
+                    # Use original dimensions instead of Telegram's (documents don't have size info)
+                    width=width,
+                    height=height,
+                )
                 for f in data.get("files", [])
             ]
 
-            _logger.info("Successfully uploaded as document")
+            _logger.info("Successfully uploaded as document with original dimensions: %sx%s", width, height)
             return telegram_files
 
         except httpx.HTTPError as e:
